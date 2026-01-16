@@ -1,11 +1,11 @@
 "use client";
 
 import data from "@/data/bouldering.json";
-import type { DataSet, GradeCode, Mode } from "@/lib/types";
-import { generateBingoGrid, canUseFree } from "@/lib/bingo";
 
 import { useMemo, useRef, useState } from "react";
 import { toPng } from "html-to-image";
+
+import { generateBingoGrid, canUseFree } from "@/lib/bingo";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
@@ -13,6 +13,35 @@ import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { ModeToggle } from "@/components/mode-toggle";
+
+type Mode = "kid" | "adult";
+type GradeCode = string;
+
+type TapeColor = {
+  label: string;
+  bgColor: string;
+  fontColor: string;
+};
+
+type Grade = {
+  label: string;
+  tapeColor?: string;
+};
+
+type Problem = {
+  key: string;
+  label?: string;
+  tapeColor?: string;
+  grade: GradeCode;
+  kid: boolean;
+  tags?: string[];
+};
+
+type DataSet = {
+  tapeColors: Record<string, TapeColor>;
+  grades: Record<GradeCode, Grade>;
+  problems: Problem[];
+};
 
 const DATA = data as unknown as DataSet;
 
@@ -38,6 +67,25 @@ function formatDateTimeJP(d: Date) {
   const mi = pad(d.getMinutes());
   const ss = pad(d.getSeconds());
   return `${yyyy}/${mm}/${dd} ${hh}:${mi}:${ss}`;
+}
+
+// スマホ×5x5でも崩れにくい文字サイズ
+function cellTextClass(size: 3 | 4 | 5) {
+  switch (size) {
+    case 3:
+      return "text-sm sm:text-base";
+    case 4:
+      return "text-xs sm:text-sm whitespace-nowrap";
+    case 5:
+      return "text-[10px] sm:text-xs whitespace-nowrap tracking-tight";
+  }
+}
+
+// grade / problem からテープ色を解決
+function resolveTapeColor(dataset: DataSet, problem: Problem): TapeColor {
+  const gradeTapeKey = dataset.grades[problem.grade]?.tapeColor;
+  const tapeKey = problem.tapeColor ?? gradeTapeKey ?? "white";
+  return dataset.tapeColors[tapeKey] ?? dataset.tapeColors["white"];
 }
 
 export default function HomePage() {
@@ -99,9 +147,7 @@ export default function HomePage() {
   }
 
   const conditionText = useMemo(() => {
-    const gradeLabels = selectedGrades
-      .map((code) => grades[code]?.label ?? code)
-      .join(", ");
+    const gradeLabels = selectedGrades.map((code) => grades[code]?.label ?? code).join(", ");
     return `${mode === "kid" ? "子供用" : "大人用"} / ${size}×${size}${actualFree ? " / FREEあり" : ""} / ${gradeLabels}`;
   }, [mode, size, actualFree, selectedGrades, grades]);
 
@@ -110,7 +156,7 @@ export default function HomePage() {
       <header className="sticky top-0 z-50 border-b bg-background/70 backdrop-blur">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3 sm:px-6">
           <div className="space-y-0.5">
-            <h1 className="text-lg font-semibold leading-none">Natura Bingo</h1>
+            <h1 className="text-lg font-semibold leading-none">Natura Problem Bingo</h1>
             <p className="text-xs text-muted-foreground">条件を選んでビンゴを生成 → PNGで保存</p>
           </div>
           <ModeToggle />
@@ -159,6 +205,9 @@ export default function HomePage() {
                     const g = grades[code];
                     const isActive = selectedGrades.includes(code);
 
+                    const gradeTapeKey = g?.tapeColor ?? "white";
+                    const gradeColor = DATA.tapeColors[gradeTapeKey] ?? DATA.tapeColors["white"];
+
                     return (
                       <ToggleGroupItem
                         key={code}
@@ -167,14 +216,14 @@ export default function HomePage() {
                         style={
                           isActive
                             ? {
-                                backgroundColor: g.bgColor,
-                                color: g.fontColor,
-                                borderColor: g.bgColor,
+                                backgroundColor: gradeColor.bgColor,
+                                color: gradeColor.fontColor,
+                                borderColor: gradeColor.bgColor,
                               }
                             : undefined
                         }
                       >
-                        {g.label}
+                        {g?.label ?? code}
                       </ToggleGroupItem>
                     );
                   })}
@@ -240,7 +289,7 @@ export default function HomePage() {
               </CardContent>
             </Card>
 
-            {/* 4) 生成ボタン（最下部） */}
+            {/* 4) 生成（最下部） */}
             <Card className="shadow-sm">
               <CardHeader>
                 <CardTitle className="text-base">生成</CardTitle>
@@ -264,73 +313,72 @@ export default function HomePage() {
               </CardHeader>
               <CardContent className="space-y-3">
                 {!grid ? (
-                  <div className="rounded-xl border bg-muted/40 p-6 text-sm text-muted-foreground">
+                  <div className="border bg-muted/40 p-6 text-sm text-muted-foreground">
                     まだビンゴがありません。左の設定から「生成する」を押してください。
                   </div>
                 ) : (
                   <div className="flex flex-col items-center gap-3">
-                    {/* 盤面（テキスト類は最小、条件と日時のみ） */}
-                    <div
-                      ref={boardRef}
-                      className="w-full max-w-[520px] rounded-2xl border bg-white p-4 shadow-sm"
-                    >
-                      {/* 盤面 */}
-                      <div className="rounded-xl border-2 border-neutral-900 p-2">
-                        <div
-                          className="grid"
-                          style={{ gridTemplateColumns: `repeat(${size}, minmax(0, 1fr))` }}
-                        >
+                    {/* 盤面（角丸なし / セル全面カラー） */}
+                    <div ref={boardRef} className="w-full max-w-[520px] border bg-white p-4 shadow-sm">
+                      <div className="border-2 border-neutral-900">
+                        <div className="grid" style={{ gridTemplateColumns: `repeat(${size}, minmax(0, 1fr))` }}>
                           {grid.flatMap((row, r) =>
-                            row.map((cell, c) => {
-                              const isCenter =
-                                actualFree &&
-                                size !== 4 &&
-                                r === Math.floor(size / 2) &&
-                                c === Math.floor(size / 2);
-
+                            row.map((cell: any, c) => {
                               if (cell.kind === "free") {
                                 return (
-                                  <div key={`${r}-${c}`} className="aspect-square border border-neutral-900 p-2">
-                                    <div className="flex h-full items-center justify-center">
-                                      <div className="flex h-full w-full flex-col items-center justify-center rounded-lg border-2 border-neutral-900 bg-red-600 text-white">
-                                        <div className="text-[10px] font-bold tracking-widest">FREE</div>
-                                        <div className="text-lg">★</div>
-                                      </div>
-                                    </div>
+                                  <div
+                                    key={`${r}-${c}`}
+                                    className={[
+                                      "aspect-square border border-neutral-900",
+                                      "flex flex-col items-center justify-center",
+                                      "bg-red-600 text-white font-extrabold select-none",
+                                      "text-xs sm:text-sm",
+                                    ].join(" ")}
+                                  >
+                                    <div className="tracking-widest">FREE</div>
+                                    <div className="text-lg">★</div>
                                   </div>
                                 );
                               }
 
-                              const gd = grades[cell.grade];
+                              // generateBingoGrid の返却が「problemそのまま」でも「key/gradeだけ」でも動くようにフォールバック
+                              const problemLike: Problem = {
+                                key: cell.key,
+                                label: cell.label,
+                                grade: cell.grade,
+                                kid: Boolean(cell.kid),
+                                tags: cell.tags,
+                                tapeColor: cell.tapeColor,
+                              };
+
+                              const color = resolveTapeColor(DATA, problemLike);
+                              const label = problemLike.label ?? problemLike.key;
 
                               return (
-                                <div key={`${r}-${c}`} className="aspect-square border border-neutral-900 p-2">
-                                  <div className="flex h-full items-center justify-center">
-                                    <div
-                                      className={[
-                                        "flex h-full w-full items-center justify-center rounded-lg border-2 border-neutral-900 text-sm font-extrabold",
-                                        isCenter ? "ring-2 ring-neutral-900" : "",
-                                      ].join(" ")}
-                                      style={{
-                                        backgroundColor: gd.bgColor,
-                                        color: gd.fontColor,
-                                      }}
-                                    >
-                                      {cell.key}
-                                    </div>
-                                  </div>
+                                <div
+                                  key={`${r}-${c}`}
+                                  className={[
+                                    "aspect-square border border-neutral-900",
+                                    "flex items-center justify-center",
+                                    "font-extrabold select-none",
+                                    cellTextClass(size),
+                                  ].join(" ")}
+                                  style={{
+                                    backgroundColor: color.bgColor,
+                                    color: color.fontColor,
+                                  }}
+                                >
+                                  {label}
                                 </div>
                               );
-                            }),
+                            })
                           )}
                         </div>
                       </div>
 
                       {/* 下部：条件（左） / 生成日時（右） */}
                       <div className="mt-3 flex items-end justify-between gap-3">
-                        <div className="text-[10px] leading-snug text-neutral-600">
-                          {conditionText}
-                        </div>
+                        <div className="text-[10px] leading-snug text-neutral-600">{conditionText}</div>
                         <div className="shrink-0 text-[10px] text-neutral-600">
                           {generatedAt ? formatDateTimeJP(generatedAt) : ""}
                         </div>
