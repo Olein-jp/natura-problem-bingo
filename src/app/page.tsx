@@ -110,7 +110,7 @@ export default function HomePage() {
       <header className="sticky top-0 z-50 border-b bg-background/70 backdrop-blur">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3 sm:px-6">
           <div className="space-y-0.5">
-            <h1 className="text-lg font-semibold leading-none">Boulder Bingo</h1>
+            <h1 className="text-lg font-semibold leading-none">Natura Bingo</h1>
             <p className="text-xs text-muted-foreground">条件を選んでビンゴを生成 → PNGで保存</p>
           </div>
           <ModeToggle />
